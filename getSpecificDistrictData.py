@@ -23,6 +23,16 @@ importantColumns = districtDataUrl[['Time','Bezirk','AnzEinwohner','AnzahlFaelle
 #convert to datetime format of time column for grouping by week,month,year
 importantColumns['Time']=pd.to_datetime(districtDataUrl['Time'],dayfirst=True)
 
+#R VALUE 
+
+rValueUrl = pd.read_csv('https://www.ages.at/fileadmin/AGES2015/Wissen-Aktuell/COVID19/R_eff.csv',sep=";",decimal=',')
+rValueUrl.info(verbose=False)
+rValueUrl.info()
+rValueUrl.dtypes
+
+importantColumnsREFF = rValueUrl[['Datum','R_eff']]
+importantColumnsREFF['Datum']=pd.to_datetime(rValueUrl['Datum'])
+
 #API
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
@@ -85,6 +95,7 @@ def api_DistrictPositiveCases_Filter():
     #json op to mime-type application/json
     return jsonify(parsedJson)
 
+
 @app.route('/api/alldistrictnames/', methods=['GET'])
 def get_all_district_names():
  districtnames=districtDataUrl['Bezirk'].unique()
@@ -92,5 +103,50 @@ def get_all_district_names():
  districtsJson = districtnames.tolist()
  json.dumps(districtsJson) 
  return jsonify(districtsJson)
+
+@app.route('/REff', methods=['GET'])
+def REffhome():
+    return "<p>R_Effective data: R effective value for austria grouped by week month and year</p>"
+
+# A route to return all the json data.
+@app.route('/api/R_eff_Austria/', methods=['GET'])
+def api_REffectiveValue_Filter():
+    
+    year=''
+    interval=''
+    #get query parameters
+    query_parameters = request.args
+    # assign param to filter data
+    
+    year=query_parameters.get('year')
+    interval=query_parameters.get('interval')
+    
+    if 'year' in query_parameters:
+        yeartofilter=str(year)
+    else:
+        return 'Error:No year provided. Please choose a year.'
+    if 'interval' in query_parameters:
+        dataintervaltofilter=interval
+        
+        if(dataintervaltofilter=='monthly'):
+             REffDataByMonth=importantColumnsREFF.assign(Month=importantColumnsREFF['Datum'].dt.strftime('%m').sort_index(),Year=importantColumnsREFF['Datum'].dt.strftime('%Y').sort_index()).groupby(['Month','Year'])['R_eff'].sum()
+             convertedJsonREff = REffDataByMonth.to_json(orient="table")
+             
+        elif(dataintervaltofilter=='weekly'):
+           REffDataByWeek=importantColumnsREFF.assign(Week=importantColumnsREFF['Datum'].dt.strftime('%W').sort_index(),Year=importantColumnsREFF['Datum'].dt.strftime('%Y').sort_index()).groupby(['Week','Year'])['R_eff'].sum()
+           convertedJsonREff = REffDataByWeek.to_json(orient="table")
+          
+        elif(dataintervaltofilter=='yearly'):
+           REffDataByYear=importantColumnsREFF.assign(Year=importantColumnsREFF['Datum'].dt.strftime('%Y').sort_index()).groupby(['Year'])['R_eff'].sum()
+           convertedJsonREff = REffDataByYear.to_json(orient="table")
+           
+    else:
+        return 'Error:No interval provided. Please choose a data interval.'
+    
+    parsedJsonREff = json.loads(convertedJsonREff)
+    json.dumps(parsedJsonREff) 
+    return jsonify(parsedJsonREff)
+
+
 
 app.run()
