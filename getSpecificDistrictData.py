@@ -8,9 +8,10 @@ Created on Sat Apr 10 15:07:15 2021
 import pandas as pd
 import flask 
 from flask import request, jsonify
-
+import requests
 import json
 
+# =============================================================================
 #district data url
 districtDataUrl = pd.read_csv('https://covid19-dashboard.ages.at/data/CovidFaelle_Timeline_GKZ.csv',sep=";")
 districtDataUrl.info(verbose=False)
@@ -25,6 +26,8 @@ importantColumns = districtDataUrl[['Time','Bezirk','AnzEinwohner','AnzahlFaelle
 #convert to datetime format of time column for grouping by week,month,year dayfirst=true for correct conversion format(yyyy-mm-dd)
 importantColumns['Time']=pd.to_datetime(districtDataUrl['Time'],dayfirst=True)
 
+# =============================================================================
+
 #R VALUE url
 
 rValueUrl = pd.read_csv('https://www.ages.at/fileadmin/AGES2015/Wissen-Aktuell/COVID19/R_eff.csv',sep=";",decimal=',')
@@ -35,7 +38,7 @@ rValueUrl.dtypes
 importantColumnsREFF = rValueUrl[['Datum','R_eff']]
 importantColumnsREFF['Datum']=pd.to_datetime(rValueUrl['Datum'])
 
-
+# =============================================================================
 #Vaccination data url
 vaccinationDataUrl = pd.read_csv('https://info.gesundheitsministerium.gv.at/data/timeline-bundeslaendermeldungen.csv',sep=';')
 vaccinationDataUrl.info(verbose=False)
@@ -54,6 +57,14 @@ importantColumnsVacc['Datum']=importantColumnsVacc['Datum'].dt.tz_convert('CET')
 print(importantColumnsVacc['Datum'])
 print(importantColumnsVacc.describe())
 
+# =============================================================================
+#read json file for warn level
+response = requests.get("https://corona-ampel.gv.at/sites/corona-ampel.gv.at/files/assets/Warnstufen_Corona_Ampel_aktuell.json") 
+entiredata=json.loads(response.text)
+finallist=[]
+# read loacl csv file for coordinates
+df = pd.read_csv (r'AustrianCitiesWithCoordinates.csv')   
+# =============================================================================
 #API
 app = flask.Flask(__name__)
 app.config["DEBUG"] = True
@@ -123,21 +134,25 @@ def api_DistrictPositiveCases_Filter():
     #json op to mime-type application/json
     return jsonify(parsedJson)
 
+# =============================================================================
+
 
 @app.route('/api/dropdownvalues/', methods=['GET'])
 def get_all_district_names():
  districtnames=districtDataUrl['Bezirk'].unique()
- dataInterval=['weekly','monthly','yearly']
- year=['2020','2021']
+ statenames=vaccinationDataUrl['Name'].unique()
+ 
  dropdownvalues=[]
  dropdownvalues.append({'districtNames':districtnames.tolist()})
- dropdownvalues.append({'dataInterval':dataInterval})
- dropdownvalues.append({'year':year})
+ dropdownvalues.append({'statenames':statenames.tolist()})
+ 
  print(dropdownvalues)
  districtsJson = dropdownvalues
 # districtsJson = districtnames.tolist()
  json.dumps(districtsJson) 
  return jsonify(districtsJson)
+
+# =============================================================================
 
 @app.route('/REff', methods=['GET'])
 def REffhome():
@@ -185,6 +200,8 @@ def api_REffectiveValue_Filter():
     json.dumps(parsedJsonREff) 
     return jsonify(parsedJsonREff)
 
+
+# =============================================================================
 
 @app.route('/Vaccination', methods=['GET'])
 def Vaccination():
@@ -240,17 +257,35 @@ def api_Vaccination_Filter():
     json.dumps(parsedJsonVacc) 
     return jsonify(parsedJsonVacc)
 
-@app.route('/api/coordinates/', methods=['GET'])
-def get_coordinates():
- coordinates = {'Region': ['Burgenland','Kärnten','Niederösterreich','Oberösterreich','Salzburg','Steiermark','Tirol','Vorarlberg','Wien'],
-        'latitude': [47.15373,46.72171,48.10761820136797,48.02698076818874,47.809238125614016,47.359788001288564, 47.25372006444835, 47.24972136421407, 48.2082],
-        'longitude':[16.26889,14.18093,15.799985593898148,13.97202152046062,13.05569498271758, 14.46895105653989,11.60217196740872,9.979392299039727,16.3738]
-        }
+# =============================================================================
 
- df = pd.DataFrame(coordinates, columns = ['Region', 'latitude','longitude'])
- df_json=df.to_json(orient="table")
- parsedJsonCoordinates= json.loads(df_json)
- json.dumps(parsedJsonCoordinates) 
- return jsonify(parsedJsonCoordinates)
+@app.route('/api/warnLevelRegion/', methods=['GET'])
+
+def api_warningLevelRegion():
+ date=''
+ query_parameters = request.args
+ date=query_parameters.get('date')
+ if 'date' in query_parameters:
+  datetofilter=date
+ else:
+  return 'Error:No date provided. Please choose a date.'
+ citiesWithCoordinatesByDate=[]
  
+ for warnLevelObjects in entiredata:
+   warnLevelObjects['Stand']=warnLevelObjects['Stand'][0:10]
+   if warnLevelObjects['Stand']== datetofilter:
+    for region in warnLevelObjects['Warnstufen']:
+     if region['Name'] is not None: 
+      for entry in df.iterrows(): 
+           if entry[1]['cityName'] == region['Name']:
+             citiesDict ={}   
+             citiesDict['cityName'] =region['Name']
+             citiesDict['Latitude'] =entry[1]['Latitude']
+             citiesDict['Longitude'] =entry[1]['Longitude']
+             citiesDict['Warnstufe'] =region['Warnstufe']
+             citiesWithCoordinatesByDate.append(citiesDict)
+ print(citiesWithCoordinatesByDate)      
+ response = jsonify(citiesWithCoordinatesByDate)
+ return response
+  
 app.run()
