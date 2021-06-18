@@ -51,19 +51,31 @@ print(vaccinationDataUrl.isnull().sum(axis = 0))
 #delete the rows where column value is NaN
 #vaccinationDataUrl.dropna(axis=0)
 importantColumnsVacc=vaccinationDataUrl[["Datum","Name","Bevölkerung","GemeldeteImpfungenLaender"]]
-print(importantColumnsVacc.describe())
+#print(importantColumnsVacc.describe())
 importantColumnsVacc['Datum']=pd.to_datetime(importantColumnsVacc['Datum'],utc=True)
 importantColumnsVacc['Datum']=importantColumnsVacc['Datum'].dt.tz_convert('CET')
-print(importantColumnsVacc['Datum'])
-print(importantColumnsVacc.describe())
+#print(importantColumnsVacc['Datum'])
+#print(importantColumnsVacc.describe())
 
 # =============================================================================
 #read json file for warn level
-response = requests.get("https://corona-ampel.gv.at/sites/corona-ampel.gv.at/files/assets/Warnstufen_Corona_Ampel_aktuell.json") 
+response = requests.get("https://corona-ampel.gv.at/sites/corona-ampel.gv.at/files/assets/Warnstufen_Corona_Ampel_aktuell.json",timeout=5) 
+#response.close()
 entiredata=json.loads(response.text)
+
 finallist=[]
 # read loacl csv file for coordinates
 df = pd.read_csv (r'AustrianCitiesWithCoordinates.csv')   
+
+# =============================================================================
+def getMarkerColor(i):
+    switcher={
+                '1':'green',
+                '2':'yellow',
+                '3':'orange',
+                '4':'red',
+             }
+    return switcher.get(i,"Invalid number")
 # =============================================================================
 #API
 app = flask.Flask(__name__)
@@ -115,10 +127,8 @@ def api_DistrictPositiveCases_Filter():
           
         elif(dataintervaltofilter=='yearly'):
            
-           districtDataByYear=filteredDistrict.assign(DistrictName=filteredDistrict['Bezirk'],Interval=filteredDistrict['Time'].dt.strftime('%Y').sort_index()).groupby(['DistrictName','Interval'])['AnzahlFaelle'].sum()
+           districtDataByYear=filteredDistrict.assign(DistrictName=filteredDistrict['Bezirk'],YearlyInterval='1',Year=filteredDistrict['Time'].dt.strftime('%Y').sort_index()).groupby(['DistrictName','Year','YearlyInterval'])['AnzahlFaelle'].sum()
            districtDataByYear_FilterYear=districtDataByYear.filter(like=yeartofilter)
-          
-           
            convertedJson = districtDataByYear_FilterYear.to_json(orient="table")
            
     else:
@@ -139,18 +149,38 @@ def api_DistrictPositiveCases_Filter():
 
 @app.route('/api/dropdownvalues/', methods=['GET'])
 def get_all_district_names():
+ #n=0;
  districtnames=districtDataUrl['Bezirk'].unique()
+ #districtDict=pd.Series('names':districtnames).to_json(orient='records',lines=True)
  statenames=vaccinationDataUrl['Name'].unique()
+ Dates=['2021-06-10','2021-06-02','2021-05-27','2021-05-20','2021-05-12','2021-05-06','2021-04-29','2021-04-22','2021-04-15','2021-04-08','2021-03-31','2021-03-25','2021-03-18','2021-03-11','2021-03-04','2021-02-25','2021-02-18','2021-02-11','2021-02-04','2021-01-28','2021-01-21','2021-01-14','2021-01-07','2020-12-30','2020-12-22','2020-12-17','2020-12-10','2020-12-03','2020-11-26','2020-11-19','2020-11-12','2020-11-05','2020-10-29','2020-10-22','2020-10-15','2020-10-09','2020-10-01','2020-09-24','2020-09-18','2020-09-15','2020-09-11','2020-09-04']
+ ddvalues=pd.DataFrame(districtnames,columns=['districtNames'])
+ dd1values=pd.DataFrame(statenames,columns=['stateNames'])
+ dd2values=pd.DataFrame(Dates,columns=['Dates'])
+ #print(type(districtnames))
+ #print(type(statenames))
+ #print(type(Dates))
+# districtDict= dict(key,value)
+ dd=ddvalues.to_json(orient='records') 
+ dd1=dd1values.to_json(orient='records') 
+ dd2=dd2values.to_json(orient='records') 
  
- dropdownvalues=[]
- dropdownvalues.append({'districtNames':districtnames.tolist()})
- dropdownvalues.append({'statenames':statenames.tolist()})
- 
- print(dropdownvalues)
- districtsJson = dropdownvalues
+# dropdownvalues=[]
+ #dropdownvalues.append(districtDict)
+ #dropdownvalues.append({'statenames':statenames.tolist()})
+ #dropdownvalues.append({'warnStufeDates':Dates})
+# print(dropdownvalues)
+ #districtsJson = dropdownvalues
 # districtsJson = districtnames.tolist()
- json.dumps(districtsJson) 
- return jsonify(districtsJson)
+ 
+
+ des=json.loads(dd)
+ des1=json.loads(dd1)
+ des2=json.loads(dd2)
+ json.dumps(des) 
+ json.dumps(des1) 
+ json.dumps(des2) 
+ return jsonify(Districts=des,States=des1,WarnLevelDates=des2)
 
 # =============================================================================
 
@@ -262,30 +292,34 @@ def api_Vaccination_Filter():
 @app.route('/api/warnLevelRegion/', methods=['GET'])
 
 def api_warningLevelRegion():
- date=''
- query_parameters = request.args
- date=query_parameters.get('date')
- if 'date' in query_parameters:
-  datetofilter=date
- else:
-  return 'Error:No date provided. Please choose a date.'
- citiesWithCoordinatesByDate=[]
- 
- for warnLevelObjects in entiredata:
-   warnLevelObjects['Stand']=warnLevelObjects['Stand'][0:10]
-   if warnLevelObjects['Stand']== datetofilter:
-    for region in warnLevelObjects['Warnstufen']:
-     if region['Name'] is not None: 
-      for entry in df.iterrows(): 
-           if entry[1]['cityName'] == region['Name']:
-             citiesDict ={}   
-             citiesDict['cityName'] =region['Name']
-             citiesDict['Latitude'] =entry[1]['Latitude']
-             citiesDict['Longitude'] =entry[1]['Longitude']
-             citiesDict['Warnstufe'] =region['Warnstufe']
-             citiesWithCoordinatesByDate.append(citiesDict)
- print(citiesWithCoordinatesByDate)      
- response = jsonify(citiesWithCoordinatesByDate)
- return response
   
+  date=''
+  query_parameters = request.args
+  date=query_parameters.get('date')
+  if 'date' in query_parameters:
+   datetofilter=date
+  else:
+   return 'Error:No date provided. Please choose a date.'
+  citiesWithCoordinatesByDate=[]
+ 
+  for warnLevelObjects in entiredata:
+    warnLevelObjects['Stand']=warnLevelObjects['Stand'][0:10]
+    if warnLevelObjects['Stand']== datetofilter:
+     for region in warnLevelObjects['Warnstufen']:
+      if region['Name'] is not None: 
+       for entry in df.iterrows(): 
+            if entry[1]['cityName'] == region['Name']:
+              citiesDict ={}
+              
+              citiesDict['cityName'] =region['Name']
+              citiesDict['Latitude'] =entry[1]['Latitude']
+              citiesDict['Longitude'] =entry[1]['Longitude']
+              citiesDict['Warnstufe'] =region['Warnstufe']
+              citiesDict['MarkerColor']=getMarkerColor(citiesDict['Warnstufe'])
+              citiesWithCoordinatesByDate.append(citiesDict)
+  print(citiesWithCoordinatesByDate)      
+  responseWarnLevel = jsonify(citiesWithCoordinatesByDate)
+  return responseWarnLevel
+                
+
 app.run()
